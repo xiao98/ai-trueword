@@ -193,7 +193,22 @@ class BilibiliBot(BasePlatformBot):
     async def _handle_dm(self, event):
         """Handle incoming private message."""
         sender_uid = event.sender_uid
+
+        # Skip own messages to prevent infinite loop
+        if sender_uid == self._my_uid:
+            return
+
         content = str(event.content) if event.content else ""
+        if not content.strip():
+            return
+
+        # Deduplicate by msg_key
+        msg_key = getattr(event, "msg_key", None)
+        if msg_key and msg_key in self._processed_at_ids:
+            return
+        if msg_key:
+            self._processed_at_ids.add(msg_key)
+
         logger.info("B站私信: UID=%s, 内容=%s", sender_uid, content[:100])
 
         # Try to find a BV号
@@ -220,7 +235,7 @@ class BilibiliBot(BasePlatformBot):
             )
             logger.info("B站私信回复: UID=%s, verdict=%s", sender_uid, result["verdict"].value)
         except Exception as e:
-            logger.error("B站私信处理失败: %s", e)
+            logger.error("B站私信处理失败: %s", e, exc_info=True)
             try:
                 await send_msg(
                     credential=self.credential,
