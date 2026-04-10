@@ -14,7 +14,7 @@ import time
 
 from bilibili_api import Credential
 from bilibili_api.comment import CommentResourceType, send_comment
-from bilibili_api.session import EventType, Session, get_at, send_msg
+from bilibili_api.session import EventType, get_at, send_msg
 from bilibili_api.user import get_self_info
 from bilibili_api.video import Video
 
@@ -167,7 +167,6 @@ class BilibiliBot(BasePlatformBot):
             ac_time_value=ac_time_value,
         )
         self._at_poll_interval = at_poll_interval
-        self._session: Session | None = None
         self._my_uid: int = 0
         self._running = False
         self._last_at_time: int = 0
@@ -194,32 +193,120 @@ class BilibiliBot(BasePlatformBot):
         )
 
     async def _run_dm_listener(self):
-        """Run DM session listener. Only one attempt — if it fails, DM is disabled."""
+        """Poll for new DMs using get_sessions + fetch_session_msgs."""
+        from bilibili_api.session import get_sessions, fetch_session_msgs
+
+        logger.info("B站私信轮询启动 (间隔10s)")
+        seen_seqnos: set[int] = set()
+        first_run = True
+
+        while self._running:
+            try:
+                sessions = await get_sessions(self.credential, session_type=1)
+                session_list = sessions.get("session_list") or []
+
+                for sess in session_list:
+                    talker_id = sess.get("talker_id", 0)
+                    if talker_id == self._my_uid:
+                        continue
+
+                    last_seqno = sess.get("max_seqno", 0)
+                    if last_seqno in seen_seqnos:
+                        continue
+
+                    # Fetch latest messages from this conversation
+                    msgs = await fetch_session_msgs(
+                        talker_id=talker_id,
+                        credential=self.credential,
+                        session_type=1,
+                    )
+                    for msg in (msgs.get("messages") or []):
+                        seqno = msg.get("msg_seqno", 0)
+                        if seqno in seen_seqnos:
+                            continue
+                        seen_seqnos.add(seqno)
+
+                        if first_run:
+                            continue  # Skip existing messages on startup
+
+                        sender = msg.get("sender_uid", 0)
+                        if sender == self._my_uid:
+                            continue
+
+                        msg_type = msg.get("msg_type", 0)
+                        content = ""
+
+                        if msg_type == 1:  # Text
+                            try:
+                                import json
+                                body = json.loads(msg.get("content", "{}"))
+                                content = body.get("content", "")
+                            except (json.JSONDecodeError, TypeError):
+                                content = str(msg.get("content", ""))
+                        elif msg_type == 7:  # Shared video
+                            try:
+                                import json
+                                body = json.loads(msg.get("content", "{}"))
+                                bvid = body.get("bvid", "")
+                                title = body.get("title", "")
+                                if bvid:
+                                    content = f"https://www.bilibili.com/video/{bvid}"
+                                elif title:
+                                    content = title
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+
+                        if content:
+                            await self._handle_dm_raw(sender, content)
+
+                    seen_seqnos.add(last_seqno)
+
+                first_run = False
+
+            except Exception as e:
+                logger.warning("B站私信轮询异常: %s", e)
+
+            await asyncio.sleep(10)
+
+    async def _handle_dm_raw(self, sender_uid: int, content: str):
+        """Handle a raw DM message."""
+        logger.info("B站私信: UID=%s, 内容=%s", sender_uid, content[:100])
+
+        bvid = extract_bvid(content)
+
         try:
-            self._session = Session(self.credential)
+            if bvid:
+                video = await extract_video_content(bvid, self.credential)
+                result = await classify(
+                    title=video["title"],
+                    content=video["content"],
+                )
+            else:
+                result = await classify(title=content, content="")
 
-            @self._session.on(EventType.TEXT)
-            async def on_text(event):
-                await self._handle_dm(event)
+            reply_text = format_reply(result)
 
-            @self._session.on(EventType.SHARE_VIDEO)
-            async def on_share(event):
-                await self._handle_dm(event)
-
-            logger.info("B站私信监听启动")
-            await self._session.run(exclude_self=True)
-
-            # run() returns immediately, keep this coroutine alive
-            while self._running:
-                await asyncio.sleep(60)
+            await send_msg(
+                credential=self.credential,
+                receiver_id=sender_uid,
+                msg_type=EventType.TEXT,
+                content=reply_text,
+            )
+            logger.info("B站私信回复: UID=%s", sender_uid)
         except Exception as e:
-            logger.warning("B站私信监听不可用（@提及仍正常工作）: %s", e)
-            # Don't retry — just let @mention polling continue
+            logger.error("B站私信处理失败: %s", e, exc_info=True)
+            try:
+                await send_msg(
+                    credential=self.credential,
+                    receiver_id=sender_uid,
+                    msg_type=EventType.TEXT,
+                    content="判定失败，请稍后再试。",
+                )
+            except Exception:
+                pass
 
     async def stop(self):
         self._running = False
-        if self._session:
-            self._session.close()
 
     async def send_reply(self, request: PlatformRequest, reply: PlatformReply):
         """Send reply based on request type."""
@@ -240,64 +327,6 @@ class BilibiliBot(BasePlatformBot):
                 msg_type=EventType.TEXT,
                 content=reply.text,
             )
-
-    # --- Internal handlers ---
-
-    async def _handle_dm(self, event):
-        """Handle incoming private message."""
-        sender_uid = event.sender_uid
-
-        # Skip own messages to prevent infinite loop
-        if sender_uid == self._my_uid:
-            return
-
-        content = str(event.content) if event.content else ""
-        if not content.strip():
-            return
-
-        # Deduplicate by msg_key
-        msg_key = getattr(event, "msg_key", None)
-        if msg_key and msg_key in self._processed_at_ids:
-            return
-        if msg_key:
-            self._processed_at_ids.add(msg_key)
-
-        logger.info("B站私信: UID=%s, 内容=%s", sender_uid, content[:100])
-
-        # Try to find a BV号
-        bvid = extract_bvid(content)
-
-        try:
-            if bvid:
-                video = await extract_video_content(bvid, self.credential)
-                result = await classify(
-                    title=video["title"],
-                    content=video["content"],
-                )
-                reply_text = format_reply(result)
-            else:
-                # Treat raw text as news to classify
-                result = await classify(title=content, content="")
-                reply_text = format_reply(result)
-
-            await send_msg(
-                credential=self.credential,
-                receiver_id=sender_uid,
-                msg_type=EventType.TEXT,
-                content=reply_text,
-            )
-            logger.info("B站私信回复: UID=%s, verdict=%s", sender_uid, result["verdict"].value)
-        except Exception as e:
-            logger.error("B站私信处理失败: %s", e, exc_info=True)
-            try:
-                await send_msg(
-                    credential=self.credential,
-                    receiver_id=sender_uid,
-                    msg_type=EventType.TEXT,
-                    content="判定失败，请稍后再试。",
-                )
-            except Exception:
-                pass
 
     async def _poll_at_mentions(self):
         """Poll for @mention notifications."""
