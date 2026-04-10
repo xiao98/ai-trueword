@@ -144,24 +144,27 @@ class BilibiliBot(BasePlatformBot):
         )
 
     async def _run_dm_listener(self):
-        """Run DM session listener with auto-retry."""
-        while self._running:
-            try:
-                self._session = Session(self.credential)
+        """Run DM session listener. Only one attempt — if it fails, DM is disabled."""
+        try:
+            self._session = Session(self.credential)
 
-                @self._session.on(EventType.TEXT)
-                async def on_text(event):
-                    await self._handle_dm(event)
+            @self._session.on(EventType.TEXT)
+            async def on_text(event):
+                await self._handle_dm(event)
 
-                @self._session.on(EventType.SHARE_VIDEO)
-                async def on_share(event):
-                    await self._handle_dm(event)
+            @self._session.on(EventType.SHARE_VIDEO)
+            async def on_share(event):
+                await self._handle_dm(event)
 
-                logger.info("B站私信监听启动")
-                await self._session.run(exclude_self=True)
-            except Exception as e:
-                logger.warning("B站私信监听异常 (将在60秒后重试): %s", e)
+            logger.info("B站私信监听启动")
+            await self._session.run(exclude_self=True)
+
+            # run() returns immediately, keep this coroutine alive
+            while self._running:
                 await asyncio.sleep(60)
+        except Exception as e:
+            logger.warning("B站私信监听不可用（@提及仍正常工作）: %s", e)
+            # Don't retry — just let @mention polling continue
 
     async def stop(self):
         self._running = False
