@@ -58,6 +58,39 @@ async def extract_video_content(bvid: str, credential: Credential) -> dict:
     title = info.get("title", "")
     desc = info.get("desc", "")
 
+    # Get subtitles (CC or AI-generated)
+    import httpx as _httpx
+
+    subtitles_text = ""
+    try:
+        first_cid = info["pages"][0]["cid"] if info.get("pages") else None
+        if first_cid:
+            player_info = await video.get_player_info(cid=first_cid)
+            subtitle_list = (
+                player_info.get("subtitle", {}).get("subtitles") or []
+            )
+            # Prefer Chinese subtitles
+            subtitle_url = ""
+            for sub in subtitle_list:
+                lan = sub.get("lan", "")
+                if "zh" in lan or "cn" in lan:
+                    subtitle_url = sub.get("subtitle_url", "")
+                    break
+            if not subtitle_url and subtitle_list:
+                subtitle_url = subtitle_list[0].get("subtitle_url", "")
+
+            if subtitle_url:
+                if subtitle_url.startswith("//"):
+                    subtitle_url = "https:" + subtitle_url
+                async with _httpx.AsyncClient(timeout=10) as client:
+                    resp = await client.get(subtitle_url)
+                    sub_data = resp.json()
+                    lines = [item.get("content", "") for item in sub_data.get("body", [])]
+                    subtitles_text = " ".join(lines)
+                    logger.info("获取字幕成功: %s, %d字", bvid, len(subtitles_text))
+    except Exception as e:
+        logger.debug("Failed to get subtitles for %s: %s", bvid, e)
+
     # Get top comments for additional context
     from bilibili_api.comment import get_comments, OrderType
 
@@ -79,13 +112,18 @@ async def extract_video_content(bvid: str, credential: Credential) -> dict:
     except Exception as e:
         logger.debug("Failed to get comments for %s: %s", bvid, e)
 
-    content = desc
+    # Compose content: subtitles > description, plus comments
+    content = ""
+    if subtitles_text:
+        content = "视频字幕内容：\n" + subtitles_text
+    elif desc:
+        content = desc
     if comments_text:
         content += comments_text
 
-    # Truncate
-    if len(content) > 2000:
-        content = content[:2000] + "..."
+    # Truncate to fit LLM context
+    if len(content) > 4000:
+        content = content[:4000] + "..."
 
     return {"title": title, "content": content, "aid": info["aid"]}
 
