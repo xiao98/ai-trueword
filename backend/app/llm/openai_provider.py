@@ -5,8 +5,7 @@ import logging
 
 from openai import AsyncOpenAI
 
-from ..models import Verdict
-from .base import BaseLLMProvider, ClassificationResult
+from .base import AnalysisResult, BaseLLMProvider
 
 logger = logging.getLogger(__name__)
 
@@ -90,13 +89,13 @@ class OpenAIProvider(BaseLLMProvider):
 
         raise ValueError("无法确定可用模型，请手动设置 OPENAI_MODEL")
 
-    async def classify(self, system_prompt: str, user_message: str) -> ClassificationResult:
+    async def classify(self, system_prompt: str, user_message: str) -> AnalysisResult:
         model = await self._resolve_model()
 
         response = await self._client.chat.completions.create(
             model=model,
             response_format={"type": "json_object"},
-            max_tokens=512,
+            max_tokens=1024,
             temperature=0.3,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -111,9 +110,17 @@ class OpenAIProvider(BaseLLMProvider):
         if start != -1 and end > start:
             text = text[start:end]
 
-        result = json.loads(text)
-        return ClassificationResult(
-            verdict=Verdict(result["verdict"]),
-            confidence=float(result["confidence"]),
-            reason=result["reason"],
+        r = json.loads(text)
+        return AnalysisResult(
+            summary=r["summary"],
+            tech_rating=int(r["tech_rating"]),
+            tech_note=r["tech_note"],
+            pm_rating=int(r["pm_rating"]),
+            pm_note=r["pm_note"],
+            beginner_rating=int(r["beginner_rating"]),
+            beginner_note=r["beginner_note"],
+            cautions=r.get("cautions", []),
+            highlights=r.get("highlights", []),
+            substance_pct=int(r.get("substance_pct", 50)),
+            marketing_pct=int(r.get("marketing_pct", 50)),
         )

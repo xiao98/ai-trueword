@@ -19,7 +19,6 @@ from bilibili_api.user import get_self_info
 from bilibili_api.video import Video
 
 from ..classifier import classify
-from ..models import VERDICT_ACTIONS, VERDICT_LABELS, Verdict
 from .base import BasePlatformBot, PlatformReply, PlatformRequest
 
 logger = logging.getLogger(__name__)
@@ -29,25 +28,35 @@ BV_PATTERN = re.compile(r"(BV[a-zA-Z0-9]{10})")
 URL_PATTERN = re.compile(r"https?://(?:www\.)?bilibili\.com/video/(BV[a-zA-Z0-9]{10})")
 SHORT_URL_PATTERN = re.compile(r"https?://b23\.tv/\S+")
 
-VERDICT_ICONS = {
-    Verdict.BREAKTHROUGH: "🟢",
-    Verdict.INCREMENTAL: "🔵",
-    Verdict.MARKETING: "🟡",
-    Verdict.HYPE: "🔴",
-}
+def _stars(n: int) -> str:
+    return "★" * n + "☆" * (5 - n)
 
 
 def format_reply(result: dict) -> str:
-    """Format classification result for B站 reply."""
-    verdict = result["verdict"]
-    icon = VERDICT_ICONS.get(verdict, "⚪")
-    confidence_pct = int(result["confidence"] * 100)
-    return (
-        f"【AI真言机判定】\n"
-        f"{icon} {result['verdict_label']} ({confidence_pct}%)\n"
-        f"{result['reason']}\n"
-        f"建议：{result['action']}"
-    )
+    """Format analysis result for B站 reply."""
+    lines = [f"【AI真言机分析】\n"]
+    lines.append(f"📌 {result['summary']}\n")
+
+    lines.append(f"🎯 适合谁看：")
+    lines.append(f"技术人员 {_stars(result['tech_rating'])} {result['tech_note']}")
+    lines.append(f"产品/运营 {_stars(result['pm_rating'])} {result['pm_note']}")
+    lines.append(f"AI入门者 {_stars(result['beginner_rating'])} {result['beginner_note']}\n")
+
+    if result.get("cautions"):
+        lines.append("⚠️ 需要注意：")
+        for c in result["cautions"]:
+            lines.append(f"• {c}")
+        lines.append("")
+
+    if result.get("highlights"):
+        lines.append("✅ 值得关注：")
+        for h in result["highlights"]:
+            lines.append(f"• {h}")
+        lines.append("")
+
+    lines.append(f"📊 实质内容 {result['substance_pct']}% / 营销成分 {result['marketing_pct']}%")
+
+    return "\n".join(lines)
 
 
 async def extract_video_content(bvid: str, credential: Credential) -> dict:

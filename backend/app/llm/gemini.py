@@ -6,23 +6,9 @@ import logging
 from google import genai
 from google.genai import types
 
-from ..models import Verdict
-from .base import BaseLLMProvider, ClassificationResult
+from .base import AnalysisResult, BaseLLMProvider
 
 logger = logging.getLogger(__name__)
-
-VERDICT_SCHEMA = types.Schema(
-    type=types.Type.OBJECT,
-    properties={
-        "verdict": types.Schema(
-            type=types.Type.STRING,
-            enum=["breakthrough", "incremental", "marketing", "hype"],
-        ),
-        "confidence": types.Schema(type=types.Type.NUMBER),
-        "reason": types.Schema(type=types.Type.STRING),
-    },
-    required=["verdict", "confidence", "reason"],
-)
 
 
 class GeminiProvider(BaseLLMProvider):
@@ -35,22 +21,29 @@ class GeminiProvider(BaseLLMProvider):
     def name(self) -> str:
         return f"gemini/{self._model}"
 
-    async def classify(self, system_prompt: str, user_message: str) -> ClassificationResult:
+    async def classify(self, system_prompt: str, user_message: str) -> AnalysisResult:
         response = await self._client.aio.models.generate_content(
             model=self._model,
             contents=user_message,
             config=types.GenerateContentConfig(
                 system_instruction=system_prompt,
                 response_mime_type="application/json",
-                response_schema=VERDICT_SCHEMA,
-                max_output_tokens=512,
+                max_output_tokens=1024,
                 temperature=0.3,
             ),
         )
 
-        result = json.loads(response.text)
-        return ClassificationResult(
-            verdict=Verdict(result["verdict"]),
-            confidence=float(result["confidence"]),
-            reason=result["reason"],
+        r = json.loads(response.text)
+        return AnalysisResult(
+            summary=r["summary"],
+            tech_rating=int(r["tech_rating"]),
+            tech_note=r["tech_note"],
+            pm_rating=int(r["pm_rating"]),
+            pm_note=r["pm_note"],
+            beginner_rating=int(r["beginner_rating"]),
+            beginner_note=r["beginner_note"],
+            cautions=r.get("cautions", []),
+            highlights=r.get("highlights", []),
+            substance_pct=int(r.get("substance_pct", 50)),
+            marketing_pct=int(r.get("marketing_pct", 50)),
         )

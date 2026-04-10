@@ -1,38 +1,58 @@
-"""AI分类引擎 — AI真言机的核心。
+"""AI分析引擎 — AI真言机的核心。
 
-薄编排层：接收新闻，委托给LLM provider分类，返回结果。
+多维度分析：适合谁看、需要注意什么、有什么价值。
 """
 
 from __future__ import annotations
 
 import logging
 
-from .llm import ClassificationResult, ModelRouter
-from .models import VERDICT_ACTIONS, VERDICT_LABELS
+from .llm import AnalysisResult, ModelRouter
 
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
-你是一个JSON API。对给定的AI新闻做定性判断，返回且仅返回一个JSON对象。
+你是"AI真言机"的分析引擎。对给定的AI相关内容做多维度分析，返回且仅返回一个JSON对象。
 
-四个判定等级：
-- breakthrough: 真正改变能力边界，有可验证的技术进步
-- incremental: 已有方向上的合理进展
-- marketing: 旧技术换新名字，正常迭代包装成革命
-- hype: 没有实质内容，标题党/情绪/FOMO驱动
+## 分析维度
 
-判断标准：
-1. 有无可验证的技术指标（benchmark、论文、开源代码）
-2. 是"能做新的事"还是"做已有的事好一点"
-3. 信息源可信度（官方技术博客 vs 自媒体转述）
-4. 情绪化词汇密度（"颠覆""革命""淘汰" = hype信号）
-5. 6个月后还会有人提吗
+1. **一句话结论**：这个内容核心讲了什么，用一句话概括
+2. **受众适合度**：分别评估对三类人群的价值（1-5星）
+   - 技术人员（工程师、研究者）
+   - 产品经理/运营（需要做AI决策的非技术人员）
+   - AI小白/入门者（刚开始关注AI的人）
+3. **需要注意的点**：具体指出内容中哪些说法有夸大、哪些数据缺乏来源、哪些结论需要进一步验证
+4. **值得关注的点**：如果有真正有价值的信息，指出来
+5. **信息质量**：实质内容占比 vs 营销成分占比（加起来100）
 
-返回格式（严格JSON，不要任何其他文字）：
-{"verdict":"breakthrough或incremental或marketing或hype","confidence":0.85,"reason":"2-4句中文，说人话"}
+## 分析标准
+
+- 有可验证的技术指标（benchmark、论文、代码）→ 实质内容高
+- 有具体的使用场景和限制说明 → 对产品经理价值高
+- 用通俗语言解释了技术原理 → 对小白价值高
+- 大量情绪化词汇（"颠覆""革命""淘汰""恐怖"）→ 营销成分高
+- 只有结论没有论证过程 → 需要注意
+- 标题和实际内容不符 → 需要注意
+
+## 返回格式（严格JSON）
+{
+  "summary": "一句话结论",
+  "tech_rating": 3,
+  "tech_note": "对技术人员的具体说明，1-2句",
+  "pm_rating": 4,
+  "pm_note": "对产品经理的具体说明，1-2句",
+  "beginner_rating": 5,
+  "beginner_note": "对小白的具体说明，1-2句",
+  "cautions": ["具体注意点1", "具体注意点2"],
+  "highlights": ["值得关注的点1"],
+  "substance_pct": 60,
+  "marketing_pct": 40
+}
+
+只返回JSON，不要任何其他文字。注意点和关注点要具体，不要泛泛而谈。
 """
 
-# Singleton router, initialized on first use
+# Singleton router
 _router: ModelRouter | None = None
 
 
@@ -44,7 +64,6 @@ def get_router() -> ModelRouter:
 
 
 def init_router(config: dict | None = None):
-    """Initialize the model router with config. Call at startup."""
     global _router
     _router = ModelRouter(config)
 
@@ -52,24 +71,30 @@ def init_router(config: dict | None = None):
 async def classify(
     title: str, content: str, url: str = "", provider: str | None = None, max_retries: int = 2
 ) -> dict:
-    """Classify a piece of AI news with retry."""
+    """Analyze a piece of AI content with retry."""
     router = get_router()
     llm = router.get(provider)
 
-    user_message = f"判定这条AI新闻：{title}"
+    user_message = f"分析这条AI内容：{title}"
     if content:
-        user_message += f"\n摘要：{content}"
+        user_message += f"\n正文：{content}"
 
     last_error = None
     for attempt in range(max_retries + 1):
         try:
-            result: ClassificationResult = await llm.classify(SYSTEM_PROMPT, user_message)
+            result: AnalysisResult = await llm.classify(SYSTEM_PROMPT, user_message)
             return {
-                "verdict": result.verdict,
-                "verdict_label": VERDICT_LABELS[result.verdict],
-                "action": VERDICT_ACTIONS[result.verdict],
-                "reason": result.reason,
-                "confidence": result.confidence,
+                "summary": result.summary,
+                "tech_rating": result.tech_rating,
+                "tech_note": result.tech_note,
+                "pm_rating": result.pm_rating,
+                "pm_note": result.pm_note,
+                "beginner_rating": result.beginner_rating,
+                "beginner_note": result.beginner_note,
+                "cautions": result.cautions,
+                "highlights": result.highlights,
+                "substance_pct": result.substance_pct,
+                "marketing_pct": result.marketing_pct,
                 "model": llm.name,
             }
         except Exception as e:

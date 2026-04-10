@@ -13,7 +13,7 @@ from .config import load_config
 from .database import get_feed, init_db, insert_classification, insert_news, is_classified
 from .extractors import ExtractorRouter
 from .extractors.webpage import WebPageExtractor
-from .models import VERDICT_ACTIONS, VERDICT_LABELS, SubmitRequest, Verdict
+from .models import SubmitRequest
 from .sources import fetch_all_sources
 
 
@@ -69,20 +69,12 @@ async def classify_url(req: SubmitRequest):
     except Exception as e:
         raise HTTPException(500, f"分类失败: {e}")
 
+    import json as _json
     await insert_classification(
-        news_id, result["verdict"].value, result["reason"], result["confidence"]
+        news_id, "analysis", _json.dumps(result, ensure_ascii=False), result["substance_pct"] / 100
     )
 
-    return {
-        "title": title,
-        "url": url,
-        "verdict": result["verdict"].value,
-        "verdict_label": result["verdict_label"],
-        "action": result["action"],
-        "reason": result["reason"],
-        "confidence": result["confidence"],
-        "model": result.get("model", ""),
-    }
+    return {"title": title, "url": url, **result}
 
 
 @app.get("/api/feed")
@@ -91,22 +83,24 @@ async def get_classified_feed(
     verdict: str | None = Query(None),
 ):
     """获取已分类的信息流。"""
+    import json as _json
     rows = await get_feed(limit, verdict)
     results = []
     for row in rows:
-        v = Verdict(row["verdict"])
-        results.append({
+        entry = {
             "id": row["id"],
             "title": row["title"],
             "url": row["url"],
             "source": row["source"],
-            "verdict": v.value,
-            "verdict_label": VERDICT_LABELS[v],
-            "action": VERDICT_ACTIONS[v],
-            "reason": row["reason"],
-            "confidence": row["confidence"],
             "classified_at": row["classified_at"],
-        })
+        }
+        # Try to parse new analysis format from reason field
+        try:
+            analysis = _json.loads(row["reason"])
+            entry.update(analysis)
+        except (ValueError, TypeError):
+            entry["summary"] = row["reason"]
+        results.append(entry)
     return results
 
 
@@ -127,19 +121,15 @@ async def fetch_and_classify(limit: int = Query(5, le=20)):
         except Exception:
             continue
 
+        import json as _json
         await insert_classification(
-            news_id, result["verdict"].value, result["reason"], result["confidence"]
+            news_id, "analysis", _json.dumps(result, ensure_ascii=False), result["substance_pct"] / 100
         )
         results.append({
             "title": item.title,
             "url": item.url,
             "source": item.source,
-            "verdict": result["verdict"].value,
-            "verdict_label": result["verdict_label"],
-            "action": result["action"],
-            "reason": result["reason"],
-            "confidence": result["confidence"],
-            "model": result.get("model", ""),
+            **result,
         })
 
     return {"classified": len(results), "items": results}
