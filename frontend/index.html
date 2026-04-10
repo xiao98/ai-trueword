@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI真言机</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #0a0a0a;
+  color: #e0e0e0;
+  min-height: 100vh;
+}
+
+.container {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 2.5rem;
+}
+
+header h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.05em;
+}
+
+header p {
+  color: #888;
+  margin-top: 0.5rem;
+  font-size: 0.95rem;
+}
+
+/* 提交区 */
+.submit-box {
+  background: #141414;
+  border: 1px solid #222;
+  border-radius: 12px;
+  padding: 1.25rem;
+  margin-bottom: 2rem;
+}
+
+.submit-box .input-row {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.submit-box input {
+  flex: 1;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 0.7rem 1rem;
+  color: #fff;
+  font-size: 0.95rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.submit-box input:focus { border-color: #555; }
+.submit-box input::placeholder { color: #555; }
+
+.btn {
+  background: #fff;
+  color: #000;
+  border: none;
+  border-radius: 8px;
+  padding: 0.7rem 1.5rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.2s;
+}
+
+.btn:hover { opacity: 0.85; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-secondary {
+  background: #222;
+  color: #ccc;
+}
+
+/* 控制栏 */
+.controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.filters {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.filter-btn {
+  background: #1a1a1a;
+  border: 1px solid #333;
+  color: #999;
+  border-radius: 20px;
+  padding: 0.4rem 1rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.filter-btn:hover { border-color: #555; color: #ccc; }
+.filter-btn.active { background: #fff; color: #000; border-color: #fff; }
+
+/* 卡片 */
+.feed { display: flex; flex-direction: column; gap: 1rem; }
+
+.card {
+  background: #141414;
+  border: 1px solid #222;
+  border-radius: 12px;
+  padding: 1.25rem;
+  transition: border-color 0.2s;
+}
+
+.card:hover { border-color: #333; }
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #fff;
+  text-decoration: none;
+  line-height: 1.4;
+}
+
+.card-title:hover { text-decoration: underline; }
+
+.badge {
+  flex-shrink: 0;
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge-breakthrough { background: #0f3d0f; color: #4ade80; border: 1px solid #166534; }
+.badge-incremental  { background: #1a2e4a; color: #60a5fa; border: 1px solid #1e40af; }
+.badge-marketing    { background: #3d2f0f; color: #fbbf24; border: 1px solid #92400e; }
+.badge-hype         { background: #3d0f0f; color: #f87171; border: 1px solid #991b1b; }
+
+.card-reason {
+  color: #aaa;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  margin-bottom: 0.75rem;
+}
+
+.card-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #555;
+  font-size: 0.8rem;
+}
+
+.card-action {
+  font-weight: 500;
+}
+
+.action-breakthrough { color: #4ade80; }
+.action-incremental  { color: #60a5fa; }
+.action-marketing    { color: #fbbf24; }
+.action-hype         { color: #f87171; }
+
+/* 状态 */
+.status {
+  text-align: center;
+  padding: 3rem;
+  color: #555;
+}
+
+.loading { color: #888; }
+
+/* 单条分类结果 */
+.single-result {
+  background: #141414;
+  border: 1px solid #222;
+  border-radius: 12px;
+  padding: 1.25rem;
+  margin-bottom: 2rem;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.confidence-bar {
+  height: 3px;
+  background: #222;
+  border-radius: 2px;
+  margin-top: 0.75rem;
+  overflow: hidden;
+}
+
+.confidence-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.5s ease;
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>AI真言机</h1>
+    <p>这条AI消息，该焦虑还是该忽略？</p>
+  </header>
+
+  <div class="submit-box">
+    <div class="input-row">
+      <input type="text" id="urlInput" placeholder="粘贴一条AI新闻的链接或标题…">
+      <button class="btn" id="classifyBtn" onclick="classifyUrl()">判定</button>
+    </div>
+  </div>
+
+  <div id="singleResult"></div>
+
+  <div class="controls">
+    <div class="filters">
+      <button class="filter-btn active" data-filter="" onclick="setFilter(this, '')">全部</button>
+      <button class="filter-btn" data-filter="breakthrough" onclick="setFilter(this, 'breakthrough')">实质性突破</button>
+      <button class="filter-btn" data-filter="incremental" onclick="setFilter(this, 'incremental')">渐进改良</button>
+      <button class="filter-btn" data-filter="marketing" onclick="setFilter(this, 'marketing')">营销包装</button>
+      <button class="filter-btn" data-filter="hype" onclick="setFilter(this, 'hype')">纯粹炒作</button>
+    </div>
+    <button class="btn btn-secondary" onclick="fetchNew()">拉取最新</button>
+  </div>
+
+  <div class="feed" id="feed">
+    <div class="status loading">加载中…</div>
+  </div>
+</div>
+
+<script>
+let currentFilter = '';
+
+async function loadFeed() {
+  const feed = document.getElementById('feed');
+  const params = new URLSearchParams({ limit: 50 });
+  if (currentFilter) params.set('verdict', currentFilter);
+
+  try {
+    const resp = await fetch('/api/feed?' + params);
+    const items = await resp.json();
+
+    if (items.length === 0) {
+      feed.innerHTML = '<div class="status">还没有数据。点击「拉取最新」或提交一条链接试试。</div>';
+      return;
+    }
+
+    feed.innerHTML = items.map(renderCard).join('');
+  } catch (e) {
+    feed.innerHTML = '<div class="status">加载失败</div>';
+  }
+}
+
+function renderCard(item) {
+  return `
+    <div class="card">
+      <div class="card-header">
+        <a class="card-title" href="${esc(item.url)}" target="_blank" rel="noopener">${esc(item.title)}</a>
+        <span class="badge badge-${item.verdict}">${esc(item.verdict_label)}</span>
+      </div>
+      <div class="card-reason">${esc(item.reason)}</div>
+      <div class="card-meta">
+        <span class="card-action action-${item.verdict}">${esc(item.action)}</span>
+        <span>${esc(item.source)}${item.classified_at ? ' · ' + formatTime(item.classified_at) : ''}</span>
+      </div>
+      <div class="confidence-bar">
+        <div class="confidence-fill badge-${item.verdict}" style="width: ${(item.confidence * 100).toFixed(0)}%"></div>
+      </div>
+    </div>
+  `;
+}
+
+async function classifyUrl() {
+  const input = document.getElementById('urlInput');
+  const btn = document.getElementById('classifyBtn');
+  const val = input.value.trim();
+  if (!val) return;
+
+  btn.disabled = true;
+  btn.textContent = '判定中…';
+
+  const isUrl = val.startsWith('http');
+  const body = isUrl ? { url: val, title: '' } : { url: '', title: val };
+
+  try {
+    const resp = await fetch('/api/classify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json();
+      alert(err.detail || '分类失败');
+      return;
+    }
+
+    const item = await resp.json();
+    document.getElementById('singleResult').innerHTML = `
+      <div class="single-result">
+        <div class="card-header">
+          <span class="card-title">${esc(item.title)}</span>
+          <span class="badge badge-${item.verdict}">${esc(item.verdict_label)}</span>
+        </div>
+        <div class="card-reason">${esc(item.reason)}</div>
+        <div class="card-meta">
+          <span class="card-action action-${item.verdict}">${esc(item.action)}</span>
+          <span>置信度 ${(item.confidence * 100).toFixed(0)}%</span>
+        </div>
+      </div>
+    `;
+    input.value = '';
+    loadFeed();
+  } catch (e) {
+    alert('请求失败');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '判定';
+  }
+}
+
+async function fetchNew() {
+  const btn = event.target;
+  btn.disabled = true;
+  btn.textContent = '拉取中…';
+
+  try {
+    const resp = await fetch('/api/fetch-and-classify', { method: 'POST' });
+    const data = await resp.json();
+    btn.textContent = `已分类 ${data.classified} 条`;
+    loadFeed();
+    setTimeout(() => { btn.textContent = '拉取最新'; btn.disabled = false; }, 2000);
+  } catch (e) {
+    btn.textContent = '拉取失败';
+    setTimeout(() => { btn.textContent = '拉取最新'; btn.disabled = false; }, 2000);
+  }
+}
+
+function setFilter(el, filter) {
+  currentFilter = filter;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  loadFeed();
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+
+function formatTime(t) {
+  try {
+    const d = new Date(t);
+    return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  } catch { return ''; }
+}
+
+document.getElementById('urlInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') classifyUrl();
+});
+
+loadFeed();
+</script>
+</body>
+</html>
