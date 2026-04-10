@@ -68,8 +68,15 @@ async def main():
     qr = QrCodeLogin()
     await qr.generate_qrcode()
 
-    print("\n请用B站App扫描下方二维码：\n")
-    print(qr.get_qrcode_terminal())
+    # 获取二维码图片URL供手机扫码
+    qr_pic = qr.get_qrcode_picture()
+    print(f"\n方法1: 用手机浏览器打开此链接，然后长按识别二维码：")
+    print(f"  {qr_pic.url}")
+    print(f"\n方法2: 终端二维码（需要终端窗口足够大）：")
+    try:
+        print(qr.get_qrcode_terminal())
+    except Exception:
+        pass
 
     print("\n等待扫码...")
 
