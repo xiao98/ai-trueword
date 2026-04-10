@@ -136,22 +136,32 @@ class BilibiliBot(BasePlatformBot):
         self._my_uid = self_info["mid"]
         logger.info("B站Bot启动: UID=%s, 用户名=%s", self._my_uid, self_info.get("uname"))
 
-        # Start DM session listener
-        self._session = Session(self.credential)
-
-        @self._session.on(EventType.TEXT)
-        async def on_text(event):
-            await self._handle_dm(event)
-
-        @self._session.on(EventType.SHARE_VIDEO)
-        async def on_share(event):
-            await self._handle_dm(event)
-
-        # Run both concurrently
+        # Run DM listener and @mention polling concurrently
+        # DM listener may fail on new accounts with no message history
         await asyncio.gather(
-            self._session.run(exclude_self=True),
+            self._run_dm_listener(),
             self._poll_at_mentions(),
         )
+
+    async def _run_dm_listener(self):
+        """Run DM session listener with auto-retry."""
+        while self._running:
+            try:
+                self._session = Session(self.credential)
+
+                @self._session.on(EventType.TEXT)
+                async def on_text(event):
+                    await self._handle_dm(event)
+
+                @self._session.on(EventType.SHARE_VIDEO)
+                async def on_share(event):
+                    await self._handle_dm(event)
+
+                logger.info("B站私信监听启动")
+                await self._session.run(exclude_self=True)
+            except Exception as e:
+                logger.warning("B站私信监听异常 (将在60秒后重试): %s", e)
+                await asyncio.sleep(60)
 
     async def stop(self):
         self._running = False
