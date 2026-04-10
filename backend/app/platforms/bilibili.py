@@ -252,11 +252,22 @@ class BilibiliBot(BasePlatformBot):
     async def _poll_at_mentions(self):
         """Poll for @mention notifications."""
         logger.info("B站@提及轮询启动 (间隔%ds)", self._at_poll_interval)
-        self._last_at_time = int(time.time())
+        # Don't filter by time — use ID-based deduplication instead
+        self._last_at_id: int = 0
+
+        # First poll: mark existing mentions as processed (don't reply to old ones)
+        try:
+            data = await get_at(self.credential)
+            for item in data.get("items") or []:
+                self._processed_at_ids.add(item.get("id", 0))
+            logger.info("已跳过 %d 条历史@提及", len(self._processed_at_ids))
+        except Exception as e:
+            logger.error("初始@提及拉取失败: %s", e)
 
         while self._running:
+            await asyncio.sleep(self._at_poll_interval)
             try:
-                data = await get_at(self.credential, at_time=self._last_at_time)
+                data = await get_at(self.credential)
                 items = data.get("items") or []
 
                 for item in items:
@@ -274,8 +285,6 @@ class BilibiliBot(BasePlatformBot):
             except Exception as e:
                 logger.error("B站@提及轮询异常: %s", e)
 
-            await asyncio.sleep(self._at_poll_interval)
-
     async def _handle_at_mention(self, item: dict):
         """Handle a single @mention notification."""
         try:
@@ -283,15 +292,12 @@ class BilibiliBot(BasePlatformBot):
             item_detail = item.get("item", {})
             source_content = item_detail.get("source_content", "")
             subject_id = item_detail.get("subject_id", 0)  # video aid
+            source_id = item_detail.get("source_id", 0)  # comment rpid
             root_id = item_detail.get("root_id", 0)
-            target_id = item_detail.get("target_id", 0)
             sender_uid = item.get("user", {}).get("mid", 0)
-            at_time = item.get("at_time", 0)
 
-            if at_time:
-                self._last_at_time = max(self._last_at_time, at_time)
-
-            logger.info("B站@提及: UID=%s, aid=%s, 内容=%s", sender_uid, subject_id, source_content[:100])
+            logger.info("B站@提及: UID=%s, aid=%s, source_id=%s, 内容=%s",
+                        sender_uid, subject_id, source_id, source_content[:100])
 
             # Try to get video info
             if subject_id:
@@ -314,8 +320,8 @@ class BilibiliBot(BasePlatformBot):
 
             reply_text = format_reply(result)
 
-            # Reply as comment
-            rpid = target_id or root_id
+            # Reply as comment — source_id is the comment that @mentioned us
+            rpid = source_id or root_id
             if subject_id and rpid:
                 await send_comment(
                     text=reply_text,
