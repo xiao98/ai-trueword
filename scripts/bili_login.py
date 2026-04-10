@@ -9,10 +9,11 @@ Usage:
 import asyncio
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from bilibili_api.login import login_with_qrcode, QrCodeLoginEvents
+from bilibili_api.login_v2 import QrCodeLogin, QrCodeLoginEvents
 from bilibili_api import Credential
 
 
@@ -63,21 +64,38 @@ async def main():
     print("=" * 40)
     print("B站扫码登录")
     print("=" * 40)
+
+    qr = QrCodeLogin()
+    await qr.generate_qrcode()
+
     print("\n请用B站App扫描下方二维码：\n")
+    print(await qr.get_qrcode_terminal())
 
-    credential = await login_with_qrcode()
+    print("\n等待扫码...")
 
-    if credential:
-        print("\n✓ 登录成功！")
-        cookies = credential.get_cookies()
-        print(f"  UID: {cookies.get('DedeUserID', 'unknown')}")
+    while True:
+        state = await qr.check_state()
 
-        update_env(credential)
+        if state == QrCodeLoginEvents.SCAN:
+            print("  已扫码，请在手机上确认...")
+        elif state == QrCodeLoginEvents.CONF:
+            print("  已确认，正在登录...")
+        elif state == QrCodeLoginEvents.DONE:
+            print("\n✓ 登录成功！")
+            credential = qr.get_credential()
+            cookies = credential.get_cookies()
+            print(f"  UID: {cookies.get('DedeUserID', 'unknown')}")
 
-        print("\n现在可以重启Bot：")
-        print("  systemctl restart ai-trueword-bilibili")
-    else:
-        print("\n✗ 登录失败，请重试。")
+            update_env(credential)
+
+            print("\n现在可以重启Bot：")
+            print("  systemctl restart ai-trueword-bilibili")
+            return
+        elif state == QrCodeLoginEvents.TIMEOUT:
+            print("\n✗ 二维码已过期，请重新运行脚本。")
+            return
+
+        await asyncio.sleep(2)
 
 
 if __name__ == "__main__":
