@@ -1,0 +1,15 @@
+[Unit]
+Description=AI真言机 Web API
+After=network.target
+
+[Service]
+Type=simple
+User=trueword
+WorkingDirectory=/home/trueword/ai-trueword
+EnvironmentFile=/home/trueword/ai-trueword/.env
+ExecStart=/home/trueword/ai-trueword/venv/bin/uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

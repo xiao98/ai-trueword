@@ -1,0 +1,15 @@
+[Unit]
+Description=AI真言机 B站Bot
+After=network.target
+
+[Service]
+Type=simple
+User=trueword
+WorkingDirectory=/home/trueword/ai-trueword
+EnvironmentFile=/home/trueword/ai-trueword/.env
+ExecStart=/home/trueword/ai-trueword/venv/bin/python -m scripts.run_bilibili
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
