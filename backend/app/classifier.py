@@ -6,72 +6,86 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 
 import anthropic
 
-from .models import VERDICT_ACTIONS, VERDICT_LABELS, ClassifiedNews, Verdict
+from .models import VERDICT_ACTIONS, VERDICT_LABELS, Verdict
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
-你是"AI真言机"的判断引擎。你的任务是对一条AI相关的新闻/信息做出定性判断。
+你是一个JSON API。对给定的AI新闻做定性判断，返回且仅返回一个JSON对象。
 
-## 你的四个判定等级
+四个判定等级：
+- breakthrough: 真正改变能力边界，有可验证的技术进步
+- incremental: 已有方向上的合理进展
+- marketing: 旧技术换新名字，正常迭代包装成革命
+- hype: 没有实质内容，标题党/情绪/FOMO驱动
 
-1. **breakthrough**（实质性突破）— 真正改变了某个领域的能力边界，有可验证的技术进步
-2. **incremental**（渐进改良）— 在已有方向上的合理进展，值得知道但不需要行动
-3. **marketing**（营销包装）— 旧技术换新名字，或者把正常迭代包装成革命性突破
-4. **hype**（纯粹炒作）— 没有实质内容，纯靠标题党/情绪/FOMO驱动传播
+判断标准：
+1. 有无可验证的技术指标（benchmark、论文、开源代码）
+2. 是"能做新的事"还是"做已有的事好一点"
+3. 信息源可信度（官方技术博客 vs 自媒体转述）
+4. 情绪化词汇密度（"颠覆""革命""淘汰" = hype信号）
+5. 6个月后还会有人提吗
 
-## 判断标准
-
-- **有没有可验证的技术指标？** benchmark、论文、开源代码、第三方复现 → 加分
-- **是"能做到新的事"还是"做已有的事更好一点"？** 前者是breakthrough，后者最多incremental
-- **信息源是谁？** 官方技术博客 vs 自媒体转述 → 自媒体往往放大
-- **用了多少情绪化词汇？** "颠覆""革命""淘汰""恐怖" → hype信号
-- **6个月后还会有人提这件事吗？** 这是终极检验
-
-## 输出格式
-
-严格返回JSON：
-{
-  "verdict": "breakthrough|incremental|marketing|hype",
-  "confidence": 0.0-1.0,
-  "reason": "一段话，说人话，解释为什么这么判。控制在2-4句话。要具体，不要泛泛而谈。"
-}
-
-只返回JSON，不要其他内容。
+返回格式（严格JSON，不要任何其他文字）：
+{"verdict":"breakthrough或incremental或marketing或hype","confidence":0.85,"reason":"2-4句中文，说人话"}
 """
 
 
-async def classify(title: str, content: str, url: str = "") -> dict:
-    """Classify a piece of AI news."""
-    client = anthropic.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-
-    user_message = f"标题：{title}\n"
-    if url:
-        user_message += f"链接：{url}\n"
-    if content:
-        user_message += f"内容：{content}\n"
-
-    message = await client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=512,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_message}],
+async def classify(title: str, content: str, url: str = "", max_retries: int = 2) -> dict:
+    """Classify a piece of AI news with retry."""
+    client = anthropic.AsyncAnthropic(
+        api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
+        base_url=os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
     )
 
-    text = message.content[0].text.strip()
-    # Handle potential markdown code block wrapping
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+    user_message = f"判定这条AI新闻：{title}"
+    if content:
+        user_message += f"\n摘要：{content}"
 
-    result = json.loads(text)
+    last_error = None
+    for attempt in range(max_retries + 1):
+        try:
+            message = await client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=512,
+                system=SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": user_message}],
+            )
 
-    verdict = Verdict(result["verdict"])
-    return {
-        "verdict": verdict,
-        "verdict_label": VERDICT_LABELS[verdict],
-        "action": VERDICT_ACTIONS[verdict],
-        "reason": result["reason"],
-        "confidence": result["confidence"],
-    }
+            # Find the first text block (skip thinking blocks)
+            text = ""
+            for block in message.content:
+                if hasattr(block, "text"):
+                    text = block.text.strip()
+                    break
+
+            if not text:
+                raise ValueError("No text response from API")
+
+            # Extract JSON object from response
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            if start == -1 or end <= start:
+                raise ValueError(f"No JSON in response: {text[:200]}")
+
+            result = json.loads(text[start:end])
+            verdict = Verdict(result["verdict"])
+
+            return {
+                "verdict": verdict,
+                "verdict_label": VERDICT_LABELS[verdict],
+                "action": VERDICT_ACTIONS[verdict],
+                "reason": result["reason"],
+                "confidence": result["confidence"],
+            }
+
+        except Exception as e:
+            last_error = e
+            logger.warning("Classify attempt %d failed: %s", attempt + 1, e)
+
+    raise last_error
