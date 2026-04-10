@@ -52,8 +52,8 @@ async def main():
     bot = BilibiliBot(
         sessdata=get_required_env("BILI_SESSDATA"),
         bili_jct=get_required_env("BILI_BILI_JCT"),
-        buvid3=get_required_env("BILI_BUVID3"),
-        dedeuserid=get_required_env("BILI_DEDEUSERID"),
+        buvid3=os.environ.get("BILI_BUVID3", ""),
+        dedeuserid=os.environ.get("BILI_DEDEUSERID", ""),
         buvid4=os.environ.get("BILI_BUVID4", ""),
         ac_time_value=os.environ.get("BILI_AC_TIME_VALUE", ""),
         at_poll_interval=int(os.environ.get("BILI_POLL_INTERVAL", "30")),
