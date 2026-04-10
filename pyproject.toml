@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai-trueword"
-version = "0.1.0"
+version = "0.2.0"
 description = "AI真言机 - 帮你判断AI信息该焦虑还是该忽略"
 readme = "README.md"
 license = "MIT"
@@ -12,17 +12,27 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
-    "anthropic>=0.40",
     "httpx>=0.27",
     "feedparser>=6.0",
     "pydantic>=2.9",
     "aiosqlite>=0.20",
+    "pyyaml>=6.0",
+    # LLM providers
+    "google-genai>=1.0",
+    "openai>=1.50",
+    # Content extraction
+    "trafilatura>=1.12",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "ruff>=0.8",
+]
+platforms = [
+    "python-telegram-bot>=21.0",
+    "tweepy>=4.14",
+    "yt-dlp>=2024.0",
 ]
 
 [tool.setuptools.packages.find]

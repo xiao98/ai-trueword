@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import aiosqlite
 
-DB_PATH = "data/zhenyan.db"
+DB_PATH = "data/trueword.db"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS news (
@@ -20,7 +20,22 @@ CREATE TABLE IF NOT EXISTS classifications (
     verdict TEXT NOT NULL,
     reason TEXT NOT NULL,
     confidence REAL NOT NULL,
+    model TEXT DEFAULT '',
     classified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS platform_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    platform TEXT NOT NULL,
+    platform_user_id TEXT,
+    platform_message_id TEXT,
+    source_url TEXT,
+    raw_context TEXT,
+    news_id INTEGER REFERENCES news(id),
+    classification_id INTEGER REFERENCES classifications(id),
+    reply_sent BOOLEAN DEFAULT FALSE,
+    reply_text TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
 

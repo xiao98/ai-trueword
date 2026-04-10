@@ -1,17 +1,14 @@
 """AI分类引擎 — AI真言机的核心。
 
-对每条AI新闻做四级定性判断，附人话理由。
+薄编排层：接收新闻，委托给LLM provider分类，返回结果。
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 
-import anthropic
-
-from .models import VERDICT_ACTIONS, VERDICT_LABELS, Verdict
+from .llm import ClassificationResult, ModelRouter
+from .models import VERDICT_ACTIONS, VERDICT_LABELS
 
 logger = logging.getLogger(__name__)
 
@@ -35,13 +32,29 @@ SYSTEM_PROMPT = """\
 {"verdict":"breakthrough或incremental或marketing或hype","confidence":0.85,"reason":"2-4句中文，说人话"}
 """
 
+# Singleton router, initialized on first use
+_router: ModelRouter | None = None
 
-async def classify(title: str, content: str, url: str = "", max_retries: int = 2) -> dict:
+
+def get_router() -> ModelRouter:
+    global _router
+    if _router is None:
+        _router = ModelRouter()
+    return _router
+
+
+def init_router(config: dict | None = None):
+    """Initialize the model router with config. Call at startup."""
+    global _router
+    _router = ModelRouter(config)
+
+
+async def classify(
+    title: str, content: str, url: str = "", provider: str | None = None, max_retries: int = 2
+) -> dict:
     """Classify a piece of AI news with retry."""
-    client = anthropic.AsyncAnthropic(
-        api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
-        base_url=os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
-    )
+    router = get_router()
+    llm = router.get(provider)
 
     user_message = f"判定这条AI新闻：{title}"
     if content:
@@ -50,42 +63,17 @@ async def classify(title: str, content: str, url: str = "", max_retries: int = 2
     last_error = None
     for attempt in range(max_retries + 1):
         try:
-            message = await client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=512,
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": user_message}],
-            )
-
-            # Find the first text block (skip thinking blocks)
-            text = ""
-            for block in message.content:
-                if hasattr(block, "text"):
-                    text = block.text.strip()
-                    break
-
-            if not text:
-                raise ValueError("No text response from API")
-
-            # Extract JSON object from response
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start == -1 or end <= start:
-                raise ValueError(f"No JSON in response: {text[:200]}")
-
-            result = json.loads(text[start:end])
-            verdict = Verdict(result["verdict"])
-
+            result: ClassificationResult = await llm.classify(SYSTEM_PROMPT, user_message)
             return {
-                "verdict": verdict,
-                "verdict_label": VERDICT_LABELS[verdict],
-                "action": VERDICT_ACTIONS[verdict],
-                "reason": result["reason"],
-                "confidence": result["confidence"],
+                "verdict": result.verdict,
+                "verdict_label": VERDICT_LABELS[result.verdict],
+                "action": VERDICT_ACTIONS[result.verdict],
+                "reason": result.reason,
+                "confidence": result.confidence,
+                "model": llm.name,
             }
-
         except Exception as e:
             last_error = e
-            logger.warning("Classify attempt %d failed: %s", attempt + 1, e)
+            logger.warning("Classify attempt %d/%d failed (%s): %s", attempt + 1, max_retries + 1, llm.name, e)
 
     raise last_error

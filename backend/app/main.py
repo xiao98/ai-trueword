@@ -8,9 +8,12 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .classifier import classify
+from .classifier import classify, init_router
+from .config import load_config
 from .database import get_feed, init_db, insert_classification, insert_news, is_classified
-from .models import VERDICT_ACTIONS, VERDICT_LABELS, ClassifiedNews, SubmitRequest, Verdict
+from .extractors import ExtractorRouter
+from .extractors.webpage import WebPageExtractor
+from .models import VERDICT_ACTIONS, VERDICT_LABELS, SubmitRequest, Verdict
 from .sources import fetch_all_sources
 
 
@@ -18,10 +21,20 @@ from .sources import fetch_all_sources
 async def lifespan(app: FastAPI):
     os.makedirs("data", exist_ok=True)
     await init_db()
+
+    # Initialize LLM router from config
+    config = load_config()
+    init_router(config)
+
+    # Initialize extractor router
+    extractor_router = ExtractorRouter()
+    extractor_router.register(WebPageExtractor())
+    app.state.extractor_router = extractor_router
+
     yield
 
 
-app = FastAPI(title="AI真言机", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="AI真言机", version="0.2.0", lifespan=lifespan)
 
 
 # --- API ---
@@ -29,27 +42,46 @@ app = FastAPI(title="AI真言机", version="0.1.0", lifespan=lifespan)
 
 @app.post("/api/classify")
 async def classify_url(req: SubmitRequest):
-    """手动提交一条信息进行分类。"""
-    if await is_classified(req.url):
+    """手动提交一条信息进行分类。支持自动提取URL内容。"""
+    title = req.title or req.url
+    content = req.content
+
+    # Auto-extract content from URL if no content provided
+    if req.url and not content:
+        try:
+            extractor: ExtractorRouter = app.state.extractor_router
+            if extractor.can_handle(req.url):
+                extracted = await extractor.extract(req.url)
+                title = extracted.title or title
+                content = extracted.text
+        except Exception:
+            pass
+
+    url = req.url or f"manual://{hash(title)}"
+
+    if req.url and await is_classified(req.url):
         raise HTTPException(400, "该链接已分类过")
 
-    news_id = await insert_news(req.title or req.url, req.url, "manual", req.content)
+    news_id = await insert_news(title, url, "manual", content)
 
     try:
-        result = await classify(req.title or req.url, req.content, req.url)
+        result = await classify(title, content, url)
     except Exception as e:
         raise HTTPException(500, f"分类失败: {e}")
 
-    await insert_classification(news_id, result["verdict"].value, result["reason"], result["confidence"])
+    await insert_classification(
+        news_id, result["verdict"].value, result["reason"], result["confidence"]
+    )
 
     return {
-        "title": req.title or req.url,
-        "url": req.url,
+        "title": title,
+        "url": url,
         "verdict": result["verdict"].value,
         "verdict_label": result["verdict_label"],
         "action": result["action"],
         "reason": result["reason"],
         "confidence": result["confidence"],
+        "model": result.get("model", ""),
     }
 
 
@@ -107,9 +139,18 @@ async def fetch_and_classify(limit: int = Query(5, le=20)):
             "action": result["action"],
             "reason": result["reason"],
             "confidence": result["confidence"],
+            "model": result.get("model", ""),
         })
 
     return {"classified": len(results), "items": results}
+
+
+@app.get("/api/models")
+async def list_models():
+    """列出可用的LLM模型。"""
+    from .classifier import get_router
+    router = get_router()
+    return {"default": router.default_name, "available": router.available}
 
 
 # --- Static frontend ---
