@@ -69,7 +69,7 @@ async def main():
     await qr.generate_qrcode()
 
     print("\n请用B站App扫描下方二维码：\n")
-    print(await qr.get_qrcode_terminal())
+    print(qr.get_qrcode_terminal())
 
     print("\n等待扫码...")
 
