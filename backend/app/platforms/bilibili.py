@@ -32,31 +32,34 @@ def _stars(n: int) -> str:
     return "★" * n + "☆" * (5 - n)
 
 
-def format_reply(result: dict) -> str:
-    """Format analysis result for B站 reply."""
-    lines = [f"【AI真言机分析】\n"]
-    lines.append(f"📌 {result['summary']}\n")
+def format_reply(result: dict, max_len: int = 950) -> str:
+    """Format analysis result for B站 reply. Kept under 1000 chars."""
+    lines = [f"【AI真言机分析】"]
+    lines.append(f"📌 {result['summary']}")
 
-    lines.append(f"🎯 适合谁看：")
-    lines.append(f"技术人员 {_stars(result['tech_rating'])} {result['tech_note']}")
-    lines.append(f"产品/运营 {_stars(result['pm_rating'])} {result['pm_note']}")
-    lines.append(f"AI入门者 {_stars(result['beginner_rating'])} {result['beginner_note']}\n")
+    lines.append(f"🎯 技术人员{_stars(result['tech_rating'])} 产品运营{_stars(result['pm_rating'])} 入门者{_stars(result['beginner_rating'])}")
+
+    # Pick the most relevant audience note (highest rated)
+    ratings = [
+        (result['tech_rating'], f"技术视角：{result['tech_note']}"),
+        (result['pm_rating'], f"产品视角：{result['pm_note']}"),
+        (result['beginner_rating'], f"入门视角：{result['beginner_note']}"),
+    ]
+    ratings.sort(key=lambda x: x[0], reverse=True)
+    lines.append(ratings[0][1])
 
     if result.get("cautions"):
-        lines.append("⚠️ 需要注意：")
-        for c in result["cautions"]:
-            lines.append(f"• {c}")
-        lines.append("")
+        lines.append("⚠️ " + result["cautions"][0])
 
     if result.get("highlights"):
-        lines.append("✅ 值得关注：")
-        for h in result["highlights"]:
-            lines.append(f"• {h}")
-        lines.append("")
+        lines.append("✅ " + result["highlights"][0])
 
-    lines.append(f"📊 实质内容 {result['substance_pct']}% / 营销成分 {result['marketing_pct']}%")
+    lines.append(f"📊 实质{result['substance_pct']}%/营销{result['marketing_pct']}%")
 
-    return "\n".join(lines)
+    text = "\n".join(lines)
+    if len(text) > max_len:
+        text = text[:max_len - 3] + "..."
+    return text
 
 
 async def extract_video_content(bvid: str, credential: Credential) -> dict:
