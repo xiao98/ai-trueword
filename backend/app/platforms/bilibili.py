@@ -185,12 +185,69 @@ class BilibiliBot(BasePlatformBot):
         self._my_uid = self_info["mid"]
         logger.info("B站Bot启动: UID=%s, 用户名=%s", self._my_uid, self_info.get("uname"))
 
-        # Run DM listener and @mention polling concurrently
-        # DM listener may fail on new accounts with no message history
+        # Run DM listener, @mention polling, and credential refresh concurrently
         await asyncio.gather(
             self._run_dm_listener(),
             self._poll_at_mentions(),
+            self._auto_refresh_credential(),
         )
+
+    async def _auto_refresh_credential(self):
+        """Periodically check and refresh B站 cookies before they expire."""
+        while self._running:
+            await asyncio.sleep(1800)  # Check every 30 minutes
+            try:
+                need_refresh = await self.credential.check_refresh()
+                if need_refresh:
+                    logger.info("B站Cookie即将过期，正在刷新...")
+                    await self.credential.refresh()
+                    self._save_credential()
+                    logger.info("B站Cookie刷新成功")
+                else:
+                    logger.debug("B站Cookie仍然有效")
+            except Exception as e:
+                logger.error("B站Cookie刷新失败: %s", e)
+
+    def _save_credential(self):
+        """Save refreshed cookies back to .env file."""
+        import os
+        env_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))))),
+            ".env"
+        )
+        cookies = self.credential.get_cookies()
+        updates = {
+            "BILI_SESSDATA": cookies.get("SESSDATA", ""),
+            "BILI_BILI_JCT": cookies.get("bili_jct", ""),
+            "BILI_BUVID3": cookies.get("buvid3", ""),
+            "BILI_DEDEUSERID": cookies.get("DedeUserID", ""),
+            "BILI_AC_TIME_VALUE": cookies.get("ac_time_value", ""),
+        }
+
+        if not os.path.exists(env_path):
+            return
+
+        with open(env_path) as f:
+            lines = f.readlines()
+
+        new_lines = []
+        existing = set()
+        for line in lines:
+            key = line.split("=", 1)[0].strip()
+            if key in updates:
+                new_lines.append(f"{key}={updates[key]}\n")
+                existing.add(key)
+            else:
+                new_lines.append(line)
+
+        for key, val in updates.items():
+            if key not in existing and val:
+                new_lines.append(f"{key}={val}\n")
+
+        with open(env_path, "w") as f:
+            f.writelines(new_lines)
+        logger.info("B站Cookie已保存到 %s", env_path)
 
     async def _run_dm_listener(self):
         """Poll for new DMs using get_sessions + fetch_session_msgs."""
