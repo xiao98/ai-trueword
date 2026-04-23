@@ -88,12 +88,18 @@ async def main():
         elif state == QrCodeLoginEvents.CONF:
             print("  已确认，正在登录...")
         elif state == QrCodeLoginEvents.DONE:
-            print("\n✓ 登录成功！")
+            print("\n✓ 扫码成功")
             credential = qr.get_credential()
             cookies = credential.get_cookies()
             print(f"  UID: {cookies.get('DedeUserID', 'unknown')}")
 
-            update_env(credential)
+            try:
+                update_env(credential)
+            except PermissionError as e:
+                print(f"\n✗ Cookie保存失败: {e}")
+                print(f"  修复: chown trueword:trueword {ENV_PATH}")
+                print(f"  然后重新扫码")
+                sys.exit(1)
 
             print("\n现在可以重启Bot：")
             print("  systemctl restart ai-trueword-bilibili")

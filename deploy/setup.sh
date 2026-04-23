@@ -38,8 +38,14 @@ pip install -e ".[platforms]"
 # 创建数据目录
 mkdir -p data
 
+# 预创建 .env（若不存在），避免 root nano 创建后 trueword 写不进去
+if [ ! -f .env ]; then
+    cp deploy/env.example .env
+fi
+
 # 设置权限
 chown -R trueword:trueword /home/trueword/ai-trueword
+chmod 600 /home/trueword/ai-trueword/.env
 
 # 5. 安装systemd服务
 echo "[5/5] 配置systemd服务..."
